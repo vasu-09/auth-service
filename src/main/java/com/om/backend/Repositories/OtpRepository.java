@@ -18,4 +18,6 @@ public interface OtpRepository extends JpaRepository<Otp, Long> {
     Optional<Otp> findByPhoneNumberAndOtpCodeAndIsUsedFalse(String phoneNumber, String otpCode);
 
     Optional<Otp> findByPhoneNumberAndIsUsedFalse(String phoneNumber);
+
+    Optional<Otp> findByPhone(String normalized);
 }

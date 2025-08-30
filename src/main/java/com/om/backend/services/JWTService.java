@@ -1,46 +1,97 @@
+
 package com.om.backend.services;
 
+import com.om.backend.Config.JwtConfig;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.SignatureAlgorithm;
-import io.jsonwebtoken.io.Decoders;
-import io.jsonwebtoken.security.Keys;
+
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 
-import javax.crypto.SecretKey;
+import java.math.BigInteger;
+import io.jsonwebtoken.security.SignatureException;
+import java.security.interfaces.RSAPrivateKey;
+import java.security.interfaces.RSAPublicKey;
+import java.security.KeyFactory;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.security.spec.RSAPublicKeySpec;
+import java.security.spec.X509EncodedKeySpec;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Date;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 
 @Service
-public class JWTService {
+public class JWTService implements OtpService.JwtSigner {
 
-    private  String secretKey = "f93c9b55c8d00c302bc7aee3c87b707cb96b0465d64ac3bc85955d4396e1e3de";
-    public String generateToken(CustomUserDetails user){
-        Map<String, Object> claims= new HashMap<>();
-        claims.put("userId", user.getId());
+    private final JwtConfig cfg;
+    private final RSAPrivateKey privateKey;
+    private final RSAPublicKey currentPublic;
+    private final @org.springframework.lang.Nullable RSAPublicKey previousPublicOrNull; // optional
+
+    public JWTService(JwtConfig cfg,
+                      RSAPrivateKey privateKey,
+                      RSAPublicKey jwtCurrentPublicKey,
+                      @org.springframework.lang.Nullable RSAPublicKey jwtPreviousPublicKey) {
+        this.cfg = cfg;
+        this.privateKey = privateKey;
+        this.currentPublic = jwtCurrentPublicKey;
+        this.previousPublicOrNull = jwtPreviousPublicKey;
+    }
+
+
+
+
+    // ---- Token creation ----
+
+    /** Short-lived access token (TTL in minutes from config) */
+    // keep name + params
+    public String generateToken(CustomUserDetails user) {
+        Instant now = Instant.now();
+        Instant exp = now.plus(Duration.ofMinutes(cfg.getAccessTtlMin()));
+
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("userId", user.getId()); // keep your custom claim
+        // Add more claims if needed (roles/tenant/etc.)
+
         return Jwts.builder()
-                .claims()
-                .add(claims)
-                .subject(user.getUsername())
-                .issuedAt(new Date(System.currentTimeMillis()))
-                .expiration(new Date(System.currentTimeMillis()+ 180 * 24 * 60 * 60 * 1000))
-                .and()
-                .signWith(getKey())
+                .header().keyId(cfg.getKid()).and()       // publish kid for verifiers (JWKS)
+                .claims().add(claims).and()
+                .subject(user.getUsername())              // subject = phone/username
+                .issuer(cfg.getIssuer())
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(exp))
+                .signWith(privateKey, Jwts.SIG.RS256)     // RS256 with RSA private key
                 .compact();
     }
 
+    /** KEEP NAME + PARAMS — long-lived refresh token (TTL in days from config). */
     public String generateRefreshToken(UserDetails userDetails) {
+        Instant now = Instant.now();
+        Instant exp = now.plus(Duration.ofDays(cfg.getRefreshTtlDays()));
+
         return Jwts.builder()
-                .setSubject(userDetails.getUsername())
-                .setIssuedAt(new Date(System.currentTimeMillis()))
-                .setExpiration(new Date(System.currentTimeMillis() + 182 * 24 * 60 * 60 * 1000)) // 7 days
-                .signWith(SignatureAlgorithm.HS256, secretKey)
+                .header().keyId(cfg.getKid()).and()       // publish kid
+                .subject(userDetails.getUsername())
+                .issuer(cfg.getIssuer())
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(exp))
+                .signWith(privateKey, Jwts.SIG.RS256)     // RS256
                 .compact();
     }
 
+    // ---- Extraction & validation ----
+
+    public String extractPhonenumber(String token) {
+        // subject = your phone/username
+        return extractClaim(token, Claims::getSubject);
+    }
+
+    /** Convenience alias if other code expects "username" */
     public String resolveUsernameFromPrincipal(Object principal) {
         if (principal == null) throw new IllegalArgumentException("principal is null");
         if (principal instanceof com.om.backend.services.CustomUserDetails cud) {
@@ -56,27 +107,17 @@ public class JWTService {
     }
 
 
-    public SecretKey getKey() {
-        byte[] keyBytes = Decoders.BASE64.decode(secretKey);
-        return Keys.hmacShaKeyFor(keyBytes);
-    }
-
-    public String extractPhonenumber(String token) {
-        return extractClaim(token, Claims::getSubject);
-    }
-
     public boolean validToken(String token, UserDetails userDetails) {
-        final String userName = extractPhonenumber(token);
-        return (userName.equals(userDetails.getUsername()) && !isTokenExpired(token));
+        final String subject = extractPhonenumber(token);
+        return subject.equals(userDetails.getUsername()) && !isTokenExpired(token);
     }
-
 
     public boolean isTokenExpired(String token) {
-        return  extractExpriation(token).before(new Date());
+        return extractExpiration(token).before(new Date());
     }
 
-    private Date extractExpriation(String token) {
-        return  extractClaim(token, Claims::getExpiration);
+    private Date extractExpiration(String token) {
+        return extractClaim(token, Claims::getExpiration);
     }
 
     private <T> T extractClaim(String token, Function<Claims, T> claimResolver) {
@@ -84,9 +125,103 @@ public class JWTService {
         return claimResolver.apply(claims);
     }
 
-    private Claims extractAllClaims(String token) {
-           return Jwts.parser().verifyWith(getKey())
+    /** Verify signature (current key), require issuer, then parse claims.
+     *  If signature fails and a previous key is configured, try that (smooth rotation).
+     */
+    public Claims extractAllClaims(String token) {
+        try {
+            return Jwts.parser()
+                    .verifyWith(currentPublic)
+                    .requireIssuer(cfg.getIssuer())
                     .build()
-                    .parseSignedClaims(token).getPayload();
+                    .parseSignedClaims(token)
+                    .getPayload();
+        } catch (SignatureException e) {
+            if (previousPublicOrNull == null) throw e;
+            return Jwts.parser()
+                    .verifyWith(previousPublicOrNull)
+                    .requireIssuer(cfg.getIssuer())
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload();
+        }
+    }
+
+    // =======================
+    // == KEY HELPERS (RSA) ==
+    // =======================
+
+    /** Derive the RSA public key (e=65537) from the private key's modulus. */
+    private static RSAPublicKey derivePublicFromPrivate(RSAPrivateKey priv) {
+        try {
+            KeyFactory kf = KeyFactory.getInstance("RSA");
+            RSAPublicKeySpec spec = new RSAPublicKeySpec(priv.getModulus(), BigInteger.valueOf(65537));
+            return (RSAPublicKey) kf.generatePublic(spec);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to derive RSA public key from private key", e);
+        }
+    }
+
+    /** Load previous public key from X.509 PEM if provided in config; else null. */
+    private static RSAPublicKey loadPreviousPublic(String publicPem) {
+        if (publicPem == null || publicPem.isBlank()) return null;
+        try {
+            String body = stripPem(publicPem, "PUBLIC KEY");
+            byte[] der = Base64.getMimeDecoder().decode(body);
+            KeyFactory kf = KeyFactory.getInstance("RSA");
+            return (RSAPublicKey) kf.generatePublic(new X509EncodedKeySpec(der));
+        } catch (Exception e) {
+            throw new IllegalStateException("Invalid previous RSA PUBLIC KEY PEM", e);
+        }
+    }
+
+    /** Utility for stripping PEM headers/footers and whitespace. */
+    private static String stripPem(String pem, String type) {
+        String p = pem.trim()
+                .replace("-----BEGIN " + type + "-----", "")
+                .replace("-----END " + type + "-----", "")
+                .replaceAll("\\s", "");
+        if (p.isEmpty()) throw new IllegalArgumentException("Empty PEM " + type);
+        return p;
+    }
+
+    @Override
+    public String signAccessToken(Long userId, String sessionId) {
+        Instant now = Instant.now();
+        Instant exp = now.plus(Duration.ofMinutes(cfg.getAccessTtlMin()));
+
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("userId", userId);
+        claims.put("sid", sessionId);
+
+        return Jwts.builder()
+                .header().keyId(cfg.getKid()).and()
+                .claims().add(claims).and()
+                .subject(String.valueOf(userId))
+                .issuer(cfg.getIssuer())
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(exp))
+                .signWith(privateKey, Jwts.SIG.RS256)
+                .compact();
+    }
+
+    @Override
+    public String signRefreshToken(Long userId, String sessionId) {
+        Instant now = Instant.now();
+        Instant exp = now.plus(Duration.ofDays(cfg.getRefreshTtlDays()));
+
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("sid", sessionId);
+
+        return Jwts.builder()
+                .header().keyId(cfg.getKid()).and()
+                .claims().add(claims).and()
+                .subject(String.valueOf(userId))
+                .issuer(cfg.getIssuer())
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(exp))
+                .signWith(privateKey, Jwts.SIG.RS256)
+                .compact();
     }
 }
+

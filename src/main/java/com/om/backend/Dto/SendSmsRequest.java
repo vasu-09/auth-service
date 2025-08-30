@@ -5,7 +5,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /** Adjust field names to EXACTLY what the API expects (case-sensitive if required). */
-@Data @NoArgsConstructor @AllArgsConstructor
+@Data
 public class SendSmsRequest {
     private String ApiKey;
     private String ClientId;

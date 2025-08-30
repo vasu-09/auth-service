@@ -5,7 +5,7 @@ import lombok.Data;
 import lombok.Getter;
 import lombok.Setter;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Entity
 @Data
@@ -14,30 +14,92 @@ import java.time.LocalDateTime;
 public class UserSession {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id; // Unique session ID
+    private String id; // Unique session ID
+
 
     private  String phoneNumber;
     private String sessionToken; // JWT token or session token for authentication
-    private LocalDateTime createdAt; // When the session was created
-    private LocalDateTime expiredAt; // When the session expires
+
     private boolean isActive; // Whether the session is still active or expired
 
+    @Column(name = "created_at")       private Instant createdAt;
+    @Column(name = "last_seen_at")     private Instant lastSeenAt;
 
     @ManyToOne
     @JoinColumn(name = "user_id")
-    private User user; // Link to the user who owns this session
+    @Column(nullable = false)
+    private Long userId;
 
-    @PrePersist
-    public void setExpiryTime() {
-        this.expiredAt = LocalDateTime.now().plusHours(1);
-        // Example expiry time of 1 hour
+
+
+    // NEW
+    @Column(name = "fcm_token", length = 2048) private String fcmToken;
+    @Column(name = "device_model")             private String deviceModel;
+    @Column(name = "platform")                 private String platform;   // "android"
+    @Column(name = "app_version")              private String appVersion;
+    @Column(name = "revoked_at")               private Instant revokedAt; // null = active
+
+    @Column(name = "refresh_token_hash") private byte[]  refreshTokenHash;
+    @Column(name = "refresh_jti")        private String  refreshJti;
+    @Column(name = "refresh_expires_at") private Instant refreshExpiresAt;
+    @Column(name = "refresh_rotated_at") private Instant refreshRotatedAt;
+
+    // --- getters/setters ---
+
+    public byte[] getRefreshTokenHash() {
+        return refreshTokenHash;
     }
 
-    public Long getId() {
+    public void setRefreshTokenHash(byte[] refreshTokenHash) {
+        this.refreshTokenHash = refreshTokenHash;
+    }
+
+    public String getRefreshJti() {
+        return refreshJti;
+    }
+
+    public void setRefreshJti(String refreshJti) {
+        this.refreshJti = refreshJti;
+    }
+
+    public Instant getRefreshExpiresAt() {
+        return refreshExpiresAt;
+    }
+
+    public void setRefreshExpiresAt(Instant refreshExpiresAt) {
+        this.refreshExpiresAt = refreshExpiresAt;
+    }
+
+    public Instant getRefreshRotatedAt() {
+        return refreshRotatedAt;
+    }
+
+    public void setRefreshRotatedAt(Instant refreshRotatedAt) {
+        this.refreshRotatedAt = refreshRotatedAt;
+    }
+
+    public Long getUserId() { return userId; }
+    public void setUserId(Long userId) { this.userId = userId; }
+    public Instant getCreatedAt() { return createdAt; }
+    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+    public Instant getLastSeenAt() { return lastSeenAt; }
+    public void setLastSeenAt(Instant lastSeenAt) { this.lastSeenAt = lastSeenAt; }
+    public String getFcmToken() { return fcmToken; }
+    public void setFcmToken(String fcmToken) { this.fcmToken = fcmToken; }
+    public String getDeviceModel() { return deviceModel; }
+    public void setDeviceModel(String deviceModel) { this.deviceModel = deviceModel; }
+    public String getPlatform() { return platform; }
+    public void setPlatform(String platform) { this.platform = platform; }
+    public String getAppVersion() { return appVersion; }
+    public void setAppVersion(String appVersion) { this.appVersion = appVersion; }
+    public Instant getRevokedAt() { return revokedAt; }
+    public void setRevokedAt(Instant revokedAt) { this.revokedAt = revokedAt; }
+
+    public String getId() {
         return id;
     }
 
-    public void setId(Long id) {
+    public void setId(String id) {
         this.id = id;
     }
 
@@ -57,21 +119,7 @@ public class UserSession {
         this.sessionToken = sessionToken;
     }
 
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
 
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public LocalDateTime getExpiredAt() {
-        return expiredAt;
-    }
-
-    public void setExpiredAt(LocalDateTime expiredAt) {
-        this.expiredAt = expiredAt;
-    }
 
     public boolean isActive() {
         return isActive;
@@ -81,12 +129,5 @@ public class UserSession {
         isActive = active;
     }
 
-    public User getUser() {
-        return user;
-    }
-
-    public void setUser(User user) {
-        this.user = user;
-    }
 }
 

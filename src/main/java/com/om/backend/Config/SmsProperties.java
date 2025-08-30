@@ -107,6 +107,12 @@ public class SmsProperties {
         private int perMinuteLimit = 1;
         private int perHourLimit = 5;
 
+        private boolean persistForAudit = false;
+
+        // getters/setters...
+        public boolean isPersistForAudit() { return persistForAudit; }
+        public void setPersistForAudit(boolean persistForAudit) { this.persistForAudit = persistForAudit; }
+
         public void setTtlMinutes(int ttlMinutes) {
             this.ttlMinutes = ttlMinutes;
         }
@@ -122,6 +128,8 @@ public class SmsProperties {
         public void setPerHourLimit(int perHourLimit) {
             this.perHourLimit = perHourLimit;
         }
+
+
     }
 
 

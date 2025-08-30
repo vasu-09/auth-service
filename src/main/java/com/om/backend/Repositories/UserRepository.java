@@ -26,4 +26,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
     List<String> findPhoneNumbersByIds(@Param("id") List<Long> id);
 
     List<User> findByPhoneNumberIn(List<String> e164Phones);
+
+    Optional<User> findByPhone(String normalized);
+
+    List<Long> findIdsByPhones(List<String> phones);
 }

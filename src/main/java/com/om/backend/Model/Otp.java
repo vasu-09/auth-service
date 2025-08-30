@@ -3,6 +3,7 @@ package com.om.backend.Model;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 
 @Entity
@@ -18,18 +19,14 @@ public class Otp {
 
     private String otpCode; // OTP code itself
     private String phoneNumber; // Phone number for which OTP is generated (in case the user tries from multiple devices)
-    private LocalDateTime createdAt; // Timestamp when OTP was generated
-    private LocalDateTime expiredAt; // Timestamp when OTP expires
+    private Instant createdAt; // Timestamp when OTP was generated
+    private Instant expiredAt; // Timestamp when OTP expires
     private boolean isUsed; // To track if OTP has been used for login
 
     @ManyToOne
     @JoinColumn(name = "user_id")
     private User user; // Link to the User entity, this OTP belongs to
 
-    @PrePersist
-    public void setExpiryTime() {
-        this.expiredAt = LocalDateTime.now().plusMinutes(5); // Set expiry to 5 minutes from creation time
-    }
 
     public Long getId() {
         return id;
@@ -55,19 +52,19 @@ public class Otp {
         this.phoneNumber = phoneNumber;
     }
 
-    public LocalDateTime getCreatedAt() {
+    public Instant getCreatedAt() {
         return createdAt;
     }
 
-    public void setCreatedAt(LocalDateTime createdAt) {
+    public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
     }
 
-    public LocalDateTime getExpiredAt() {
+    public Instant getExpiredAt() {
         return expiredAt;
     }
 
-    public void setExpiredAt(LocalDateTime expiredAt) {
+    public void setExpiredAt(Instant expiredAt) {
         this.expiredAt = expiredAt;
     }
 
